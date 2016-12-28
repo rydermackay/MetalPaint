@@ -21,28 +21,28 @@ final class QuadRenderer {
         let library = device.newDefaultLibrary()!
         
         let renderPipelineDescriptor = MTLRenderPipelineDescriptor()
-        renderPipelineDescriptor.colorAttachments[0].pixelFormat = .BGRA8Unorm
-        renderPipelineDescriptor.vertexFunction = library.newFunctionWithName("passThroughVertex")
-        renderPipelineDescriptor.fragmentFunction = library.newFunctionWithName("passThroughFragment")
+        renderPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        renderPipelineDescriptor.vertexFunction = library.makeFunction(name: "passThroughVertex")
+        renderPipelineDescriptor.fragmentFunction = library.makeFunction(name: "passThroughFragment")
         
         // enable source over blending, e.g. r = (s * s.a) + d * (1 - s.a)
-        renderPipelineDescriptor.colorAttachments[0].blendingEnabled = true
-        renderPipelineDescriptor.colorAttachments[0].rgbBlendOperation = .Add
-        renderPipelineDescriptor.colorAttachments[0].alphaBlendOperation = .Add
+        renderPipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+        renderPipelineDescriptor.colorAttachments[0].rgbBlendOperation = .add
+        renderPipelineDescriptor.colorAttachments[0].alphaBlendOperation = .add
         
-        renderPipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .One
-        renderPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .One
-        renderPipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .OneMinusSourceAlpha
-        renderPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .OneMinusSourceAlpha
+        renderPipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+        renderPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        renderPipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        renderPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
         
-        blendRGBOnlyPipelineState = try! device.newRenderPipelineStateWithDescriptor(renderPipelineDescriptor)
+        blendRGBOnlyPipelineState = try! device.makeRenderPipelineState(descriptor: renderPipelineDescriptor)
         
-        renderPipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .SourceAlpha
-        renderPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .SourceAlpha
-        renderPipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .OneMinusSourceAlpha
-        renderPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .OneMinusSourceAlpha
+        renderPipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        renderPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+        renderPipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        renderPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
         
-        blendRGBAndAlphaPipelineState = try! device.newRenderPipelineStateWithDescriptor(renderPipelineDescriptor)
+        blendRGBAndAlphaPipelineState = try! device.makeRenderPipelineState(descriptor: renderPipelineDescriptor)
     }
     
     // set transforms etc.
@@ -50,14 +50,14 @@ final class QuadRenderer {
         
     }
     
-    func renderTexture(texture: MTLTexture, inTexture colorAttachmentTexture: MTLTexture, commandBuffer: MTLCommandBuffer, shouldClear: Bool, textureIsPremultipled: Bool) {
+    func renderTexture(_ texture: MTLTexture, inTexture colorAttachmentTexture: MTLTexture, commandBuffer: MTLCommandBuffer, shouldClear: Bool, textureIsPremultipled: Bool) {
         let descriptor = MTLRenderPassDescriptor()
-        descriptor.colorAttachments[0].loadAction = shouldClear ? .Clear : .Load
+        descriptor.colorAttachments[0].loadAction = shouldClear ? .clear : .load
         descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1)
-        descriptor.colorAttachments[0].storeAction = .Store
+        descriptor.colorAttachments[0].storeAction = .store
         descriptor.colorAttachments[0].texture = colorAttachmentTexture
         
-        let renderCommandEncoder = commandBuffer.renderCommandEncoderWithDescriptor(descriptor)
+        let renderCommandEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
         renderCommandEncoder.setRenderPipelineState(textureIsPremultipled ? blendRGBOnlyPipelineState : blendRGBAndAlphaPipelineState)
         texturedQuad.encodeDrawCommands(renderCommandEncoder, texture: texture)
         renderCommandEncoder.endEncoding()
@@ -87,31 +87,31 @@ final class TexturedQuad {
         ]
     }
     
-    private let device: MTLDevice
-    private let vertexBuffer: MTLBuffer
-    private let samplerState: MTLSamplerState
+    fileprivate let device: MTLDevice
+    fileprivate let vertexBuffer: MTLBuffer
+    fileprivate let samplerState: MTLSamplerState
     
     init(device: MTLDevice) {
         self.device = device
         var vertices = TexturedQuad.vertices
-        vertexBuffer = device.newBufferWithBytes(&vertices, length: vertices.count * strideof(Vertex), options: [])
+        vertexBuffer = device.makeBuffer(bytes: &vertices, length: vertices.count * MemoryLayout<Vertex>.stride, options: [])
         
         let samplerDescriptor = MTLSamplerDescriptor()
-        samplerDescriptor.sAddressMode = .ClampToEdge
-        samplerDescriptor.tAddressMode = .ClampToEdge
-        samplerDescriptor.minFilter = .Linear
-        samplerDescriptor.magFilter = .Linear
+        samplerDescriptor.sAddressMode = .clampToEdge
+        samplerDescriptor.tAddressMode = .clampToEdge
+        samplerDescriptor.minFilter = .linear
+        samplerDescriptor.magFilter = .linear
         
-        samplerState = device.newSamplerStateWithDescriptor(samplerDescriptor)
+        samplerState = device.makeSamplerState(descriptor: samplerDescriptor)
     }
     
-    var primitiveType: MTLPrimitiveType { return .Triangle }
-    var vertexCount: Int { return vertexBuffer.length / strideof(Vertex) }
+    var primitiveType: MTLPrimitiveType { return .triangle }
+    var vertexCount: Int { return vertexBuffer.length / MemoryLayout<Vertex>.stride }
     
-    func encodeDrawCommands(encoder: MTLRenderCommandEncoder, texture: MTLTexture) {
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, atIndex: 0)
-        encoder.setFragmentTexture(texture, atIndex: 0)
-        encoder.setFragmentSamplerState(samplerState, atIndex: 0)
-        encoder.drawPrimitives(primitiveType, vertexStart: 0, vertexCount: vertexCount)
+    func encodeDrawCommands(_ encoder: MTLRenderCommandEncoder, texture: MTLTexture) {
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, at: 0)
+        encoder.setFragmentTexture(texture, at: 0)
+        encoder.setFragmentSamplerState(samplerState, at: 0)
+        encoder.drawPrimitives(type: primitiveType, vertexStart: 0, vertexCount: vertexCount)
     }
 }
