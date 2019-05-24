@@ -15,10 +15,10 @@ final class ColorPicker : UIControl {
     
     var stackView: UIStackView!
     lazy var visualEffectView: UIVisualEffectView = {
-        let effect = UIBlurEffect(style: .Light)
+        let effect = UIBlurEffect(style: .light)
         let v = UIVisualEffectView(effect: effect)
         v.frame = self.bounds
-        v.autoresizingMask = [.FlexibleWidth, .FlexibleHeight]
+        v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         self.addSubview(v)
         return v
     }()
@@ -30,18 +30,18 @@ final class ColorPicker : UIControl {
             }
             
             buttons = colors.map {
-                let b = UIButton(type: .Custom)
-                b.setImage(swatchImageForColor($0, forState: .Normal), forState: .Normal)
-                b.addTarget(self, action: "selectColor:", forControlEvents: .TouchUpInside)
+                let b = UIButton(type: .custom)
+                b.setImage(swatchImageForColor(color: $0, forState: .normal), for: .normal)
+                b.addTarget(self, action: #selector(selectColor(_:)), for: .touchUpInside)
                 return b
             }
             stackView = UIStackView(arrangedSubviews: buttons)
-            stackView.axis = .Horizontal
+            stackView.axis = .horizontal
             stackView.frame = visualEffectView.contentView.bounds
-            stackView.autoresizingMask = [.FlexibleWidth, .FlexibleHeight]
-            stackView.distribution = .EqualSpacing
+            stackView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            stackView.distribution = .equalSpacing
             stackView.layoutMargins = UIEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-            stackView.layoutMarginsRelativeArrangement = true
+            stackView.isLayoutMarginsRelativeArrangement = true
             visualEffectView.contentView.addSubview(stackView)
         }
     }
@@ -51,36 +51,37 @@ final class ColorPicker : UIControl {
         
         let maskLayer = CAShapeLayer()
         maskLayer.frame = layer.bounds
-        maskLayer.path = UIBezierPath(roundedRect: layer.bounds, byRoundingCorners: [.TopLeft, .TopRight], cornerRadii: CGSize(width: 10, height: 10)).CGPath
+        maskLayer.path = UIBezierPath(roundedRect: layer.bounds, byRoundingCorners: [.topLeft, .topRight], cornerRadii: CGSize(width: 10, height: 10)).cgPath
         layer.mask = maskLayer
     }
     
-    override func intrinsicContentSize() -> CGSize {
+    override var intrinsicContentSize: CGSize {
         return CGSize(width: 20 + colors.count * (44 + 20) + 20, height: 44 + 40)
     }
     
-    @IBAction func selectColor(sender: UIButton) {
-        selectedIndex = buttons.indexOf(sender)!
-        sendActionsForControlEvents(.ValueChanged)
+    @IBAction func selectColor(_ sender: UIButton) {
+        selectedIndex = buttons.firstIndex(of: sender)!
+        sendActions(for: .valueChanged)
     }
     
     var selectedIndex: Int = 0 {
         didSet {
-            for (index, button) in buttons.enumerate() {
-                button.selected = index == selectedIndex
+            for (index, button) in buttons.enumerated() {
+                button.isSelected = index == selectedIndex
             }
         }
     }
     
-    func swatchImageForColor(color: UIColor, forState state: UIControlState) -> UIImage {
+    // TODO: use UIGraphicsImgaeRenderer
+    func swatchImageForColor(color: UIColor, forState state: UIControl.State) -> UIImage {
         let length = 44
         let rect = CGRect(origin: .zero, size: CGSize(width: length, height: length))
         UIGraphicsBeginImageContextWithOptions(rect.size, false, 0)
         color.setFill()
-        let oval = UIBezierPath(ovalInRect: rect)
+        let oval = UIBezierPath(ovalIn: rect)
         oval.addClip()
         oval.fill()
-        let image = UIGraphicsGetImageFromCurrentImageContext()
+        let image = UIGraphicsGetImageFromCurrentImageContext()!
         UIGraphicsEndImageContext()
         return image
     }

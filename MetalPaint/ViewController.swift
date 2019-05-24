@@ -22,7 +22,6 @@ final class Line {
 }
 
 final class Layer {
-    let buffer: MTLBuffer
     let texture: MTLTexture
     let width: Int
     let height: Int
@@ -34,10 +33,9 @@ final class Layer {
         let height = Int(floor(size.height))
         self.width = width
         self.height = height
-        let bytesPerRow = width * 4
-        let descriptor = MTLTextureDescriptor.texture2DDescriptorWithPixelFormat(.BGRA8Unorm, width: width, height: height, mipmapped: false)
-        buffer = device.newBufferWithLength(bytesPerRow * height, options: .StorageModeShared)
-        texture = buffer.newTextureWithDescriptor(descriptor, offset: 0, bytesPerRow: bytesPerRow)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        descriptor.usage.insert(.renderTarget)
+        texture = device.makeTexture(descriptor: descriptor)!
     }
     
     func drawInLayer(layer: Layer) {
@@ -67,22 +65,23 @@ final class Layer {
 
 
 extension ViewController: MTKViewDelegate {
-    func drawInMTKView(view: MTKView) {
-        guard let drawable = view.currentDrawable else { return }
-        let commandBuffer = commandQueue.commandBuffer()
+    
+    func draw(in view: MTKView) {
+        guard let drawable = view.currentDrawable,
+            let commandBuffer = commandQueue.makeCommandBuffer() else { return }
         
-        renderer.renderTexture(frozenLayer.texture, inTexture: drawable.texture, commandBuffer: commandBuffer, shouldClear: true, textureIsPremultipled: true)
+        renderer.renderTexture(texture: frozenLayer.texture, inTexture: drawable.texture, commandBuffer: commandBuffer, shouldClear: true, textureIsPremultipled: true)
         
         if let texture = activeLayer?.texture {
-            renderer.renderTexture(texture, inTexture: drawable.texture, commandBuffer: commandBuffer, shouldClear: false, textureIsPremultipled: true)
-            renderer.renderTexture(predictiveLayer!.texture, inTexture: drawable.texture, commandBuffer: commandBuffer, shouldClear: false, textureIsPremultipled: true)
+            renderer.renderTexture(texture: texture, inTexture: drawable.texture, commandBuffer: commandBuffer, shouldClear: false, textureIsPremultipled: true)
+            renderer.renderTexture(texture: predictiveLayer!.texture, inTexture: drawable.texture, commandBuffer: commandBuffer, shouldClear: false, textureIsPremultipled: true)
         }
         
-        commandBuffer.presentDrawable(drawable)
+        commandBuffer.present(drawable)
         commandBuffer.commit()
     }
     
-    func mtkView(view: MTKView, drawableSizeWillChange size: CGSize) {
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         // update uniforms, temporary buffers etc
     }
 }
@@ -91,25 +90,13 @@ extension ViewController: MTKViewDelegate {
 class ViewController: UIViewController {
 
     lazy var renderer: QuadRenderer = { return QuadRenderer(device: self.device) }()
-    lazy var commandQueue: MTLCommandQueue = { return self.device.newCommandQueue() }()
+    lazy var commandQueue = device.makeCommandQueue()!
     
-    var metalView: MTKView!
+    @IBOutlet var metalView: MTKView!
     
     var device: MTLDevice!
     
     var brushTexture: MTLTexture!
-    
-    override func loadView() {
-        super.loadView()
-        
-        metalView = self.view as! MTKView
-        
-        let view = UIView(frame: metalView.bounds)
-        metalView.autoresizingMask = [.FlexibleWidth, .FlexibleHeight]
-        metalView.frame = view.bounds
-        view.addSubview(metalView)
-        self.view = view
-    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -126,47 +113,42 @@ class ViewController: UIViewController {
             let length = 22
             let rect = CGRect(origin: .zero, size: CGSize(width: length, height: length))
             UIGraphicsBeginImageContextWithOptions(rect.size, true, 0)
-            UIColor.blackColor().setFill()
-            UIBezierPath(ovalInRect: rect).fill()
-            let image = UIGraphicsGetImageFromCurrentImageContext()
+            UIColor.black.setFill()
+            UIBezierPath(ovalIn: rect).fill()
+            let image = UIGraphicsGetImageFromCurrentImageContext()!
             UIGraphicsEndImageContext()
             
-            brushTexture = try! MTKTextureLoader(device: device).newTextureWithCGImage(image.CGImage!, options: nil)
+            brushTexture = try! MTKTextureLoader(device: device).newTexture(cgImage: image.cgImage!, options: nil)
         }
         
-        let doubleTap = UITapGestureRecognizer(target: self, action: "clear:")
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(clear(_:)))
         doubleTap.numberOfTapsRequired = 1
         doubleTap.numberOfTouchesRequired = 2
-        doubleTap.allowedTouchTypes = [NSNumber(integer: UITouchType.Direct.rawValue)]
+        doubleTap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         view.addGestureRecognizer(doubleTap)
         
         
         colorPicker = ColorPicker()
-        colorPicker.colors = [.blackColor(), .redColor(), .orangeColor(), .yellowColor(), .greenColor(), .blueColor(), .purpleColor()]
+        colorPicker.colors = [.black, .red, .orange, .yellow, .green, .blue, .purple]
         colorPicker.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(colorPicker)
-        view.leftAnchor.constraintLessThanOrEqualToAnchor(colorPicker.leftAnchor).active = true
-        view.rightAnchor.constraintGreaterThanOrEqualToAnchor(colorPicker.rightAnchor).active = true
-        view.centerXAnchor.constraintEqualToAnchor(colorPicker.centerXAnchor).active = true
-        view.bottomAnchor.constraintEqualToAnchor(colorPicker.bottomAnchor).active = true
-        colorPicker.addTarget(self, action: "pickedColor:", forControlEvents: .ValueChanged)
+        view.leftAnchor.constraint(lessThanOrEqualTo: colorPicker.leftAnchor).isActive = true
+        view.rightAnchor.constraint(greaterThanOrEqualTo: colorPicker.rightAnchor).isActive = true
+        view.centerXAnchor.constraint(equalTo: colorPicker.centerXAnchor).isActive = true
+        view.bottomAnchor.constraint(equalTo: colorPicker.bottomAnchor).isActive = true
+        colorPicker.addTarget(self, action: #selector(pickedColor(_:)), for: .valueChanged)
     }
     
     var colorPicker: ColorPicker!
-    var selectedColor = UIColor.blackColor()
+    var selectedColor = UIColor.black
     
-    @IBAction func pickedColor(sender: ColorPicker) {
+    @IBAction func pickedColor(_ sender: ColorPicker) {
         selectedColor = sender.colors[sender.selectedIndex]
     }
-
-    override func didReceiveMemoryWarning() {
-        super.didReceiveMemoryWarning()
-        // Dispose of any resources that can be recreated.
-    }
     
-    @IBAction func clear(sender: AnyObject?) {
-        for layer in [frozenLayer, activeLayer!, predictiveLayer!] {
-            clearLayer(layer)
+    @IBAction func clear(_ sender: AnyObject?) {
+        for layer in ([frozenLayer, activeLayer!, predictiveLayer!] as! [Layer]) {
+            clearLayer(layer: layer)
         }
         metalView.setNeedsDisplay()
     }
@@ -204,17 +186,17 @@ class ViewController: UIViewController {
             // get or create active line for touch via map table
             
             // remove predicted touches and mark area as needing redraw
-            clearLayer(predictiveLayer!)
+            clearLayer(layer: predictiveLayer!)
             
             // add touch methods should return dirty rect
             
-            if let coalescedTouches = event?.coalescedTouchesForTouch(touch) {
-                addPointsToLineForTouches(coalescedTouches, type: .Coalesced)
+            if let coalescedTouches = event?.coalescedTouches(for: touch) {
+                addPointsToLineForTouches(touches: coalescedTouches, type: .Coalesced)
             } else {
-                addPointsToLineForTouches([touch], type: .Main)
+                addPointsToLineForTouches(touches: [touch], type: .Main)
             }
-            if let predictedTouches = event?.predictedTouchesForTouch(touch) {
-                addPointsToLineForTouches(predictedTouches, type: .Predicted)
+            if let predictedTouches = event?.predictedTouches(for: touch) {
+                addPointsToLineForTouches(touches: predictedTouches, type: .Predicted)
             }
         }
         
@@ -222,13 +204,13 @@ class ViewController: UIViewController {
     }
     
     func clearLayer(layer: Layer) {
-        let commandBuffer = commandQueue.commandBuffer()
+        let commandBuffer = commandQueue.makeCommandBuffer()!
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        descriptor.colorAttachments[0].loadAction = .Clear
+        descriptor.colorAttachments[0].loadAction = .clear
         descriptor.colorAttachments[0].texture = layer.texture
-        descriptor.colorAttachments[0].storeAction = .Store
-        let renderCommandEncoder = commandBuffer.renderCommandEncoderWithDescriptor(descriptor)
+        descriptor.colorAttachments[0].storeAction = .store
+        let renderCommandEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)!
         renderCommandEncoder.endEncoding()
         
         commandBuffer.commit()
@@ -240,12 +222,12 @@ class ViewController: UIViewController {
         case Predicted
     }
     
-    let colorSpace = CGColorSpaceCreateDeviceRGB()!
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
     
     lazy var ciContext: CIContext = {
-        return CIContext(MTLDevice: self.device, options: [
-            kCIContextOutputColorSpace: self.colorSpace,
-            kCIContextWorkingColorSpace: self.colorSpace
+        return CIContext(mtlDevice: self.device, options: [
+            CIContextOption.outputColorSpace: self.colorSpace,
+            CIContextOption.workingColorSpace: self.colorSpace
         ])
     }()
     
@@ -262,34 +244,34 @@ class ViewController: UIViewController {
     func addPointsToLineForTouches(touches: [UITouch], type: TouchType) {
         
         let texture = type == .Predicted ? predictiveLayer!.texture : activeLayer!.texture
-        let sourceImage = CIImage(MTLTexture: texture, options: [kCIImageColorSpace: colorSpace])
+        let sourceImage = CIImage(mtlTexture: texture, options: [CIImageOption.colorSpace: colorSpace])
         
         let brushSize = MTLSize(width: brushTexture.width, height: brushTexture.height, depth: 1)
         
         if coreImageRenderDestinationTexture == nil {
-            let descriptor = MTLTextureDescriptor.texture2DDescriptorWithPixelFormat(.BGRA8Unorm, width: brushSize.width, height: brushSize.height, mipmapped: false)
-            descriptor.usage = [.RenderTarget, .ShaderRead, .ShaderWrite]
-            coreImageRenderDestinationTexture = device.newTextureWithDescriptor(descriptor)
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: brushSize.width, height: brushSize.height, mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead, .shaderWrite]
+            coreImageRenderDestinationTexture = device.makeTexture(descriptor: descriptor)
         }
         
-        let commandBuffer = commandQueue.commandBuffer()
+        let commandBuffer = commandQueue.makeCommandBuffer()!
         
         for touch in touches {
             
-            var point = touch.preciseLocationInView(view)
+            var point = touch.preciseLocation(in: view)
             point.x = metalView.drawableSize.width * point.x / metalView.bounds.width
             point.y = metalView.drawableSize.height * point.y / metalView.bounds.height
             let size = CGSize(width: brushTexture.width, height: brushTexture.height)
-            let translation = CGAffineTransformMakeTranslation(floor(point.x - size.width / 2), floor(point.y - size.height / 2))
-            var brushImage = CIImage(MTLTexture: brushTexture, options: [kCIImageColorSpace: colorSpace]).imageByApplyingTransform(translation)
-            brushImage = brushImage.imageByApplyingFilter("CIColorMatrix", withInputParameters: ["inputBiasVector": selectedColorVector]).imageByCroppingToRect(brushImage.extent)
+            let translation = CGAffineTransform(translationX: floor(point.x - size.width / 2), y: floor(point.y - size.height / 2))
+            var brushImage = CIImage(mtlTexture: brushTexture, options: [CIImageOption.colorSpace: colorSpace])!.transformed(by: translation)
+            brushImage = brushImage.applyingFilter("CIColorMatrix", parameters: ["inputBiasVector": selectedColorVector]).cropped(to: brushImage.extent)
             
-            if touch.type == .Stylus || touch.force > 0 {
+            if touch.type == .stylus || touch.force > 0 {
                 let alpha = max(touch.force / touch.maximumPossibleForce, 0.025)
-                brushImage = brushImage.imageWithAlpha(alpha)
+                brushImage = brushImage.image(withAlpha: alpha)
             }
             
-            let renderImage = brushImage.imageByCompositingOverImage(sourceImage).imageByCroppingToRect(brushImage.extent).imageByCroppingToRect(sourceImage.extent) // should slice off edges
+            let renderImage = brushImage.composited(over: sourceImage!).cropped(to: brushImage.extent).cropped(to: sourceImage!.extent) // should slice off edges
             if renderImage.extent.isNull {
                 continue
             }
@@ -299,10 +281,10 @@ class ViewController: UIViewController {
             
             // CoreImage will give you premultiplied color values so if you blend RGB w/ sourceAlpha you'll just darken the image to nothing
             // treat the content of this buffer (and all active line buffers) as premultiplied
-            ciContext.render(renderImage, toMTLTexture: coreImageRenderDestinationTexture, commandBuffer: commandBuffer, bounds: renderImage.extent, colorSpace: colorSpace)
+            ciContext.render(renderImage, to: coreImageRenderDestinationTexture, commandBuffer: commandBuffer, bounds: renderImage.extent, colorSpace: colorSpace)
             
-            let blit = commandBuffer.blitCommandEncoder()
-            blit.copyFromTexture(coreImageRenderDestinationTexture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0), sourceSize: MTLSize(width: Int(extent.width), height: Int(extent.height), depth: 1), toTexture: texture, destinationSlice: 0, destinationLevel: 0, destinationOrigin: region.origin)
+            let blit = commandBuffer.makeBlitCommandEncoder()!
+            blit.copy(from: coreImageRenderDestinationTexture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0), sourceSize: MTLSize(width: Int(extent.width), height: Int(extent.height), depth: 1), to: texture, destinationSlice: 0, destinationLevel: 0, destinationOrigin: region.origin)
             blit.endEncoding()
         }
         
@@ -314,16 +296,16 @@ class ViewController: UIViewController {
     func endTouches(touches: Set<UITouch>, cancel: Bool) {
         if !cancel {
             // snapshot + put on undo stack
-            activeLayer?.drawInLayer(frozenLayer)
+            activeLayer?.drawInLayer(layer: frozenLayer)
             
             
-            let commandBuffer = commandQueue.commandBuffer()
-            renderer.renderTexture(activeLayer!.texture, inTexture: frozenLayer.texture, commandBuffer: commandBuffer, shouldClear: false, textureIsPremultipled: true)
+            let commandBuffer = commandQueue.makeCommandBuffer()!
+            renderer.renderTexture(texture: activeLayer!.texture, inTexture: frozenLayer.texture, commandBuffer: commandBuffer, shouldClear: false, textureIsPremultipled: true)
             commandBuffer.commit()
         }
         
-        clearLayer(activeLayer!)
-        clearLayer(predictiveLayer!)
+        clearLayer(layer: activeLayer!)
+        clearLayer(layer: predictiveLayer!)
         
         // cancel? discard layer
         // otherwise snapshot frozen layer under layer's rect, then source-over composite it into frozen layer
@@ -331,16 +313,12 @@ class ViewController: UIViewController {
         metalView.setNeedsDisplay()
     }
     
-    func updateEstimatedPropertiesForTouches(touches: Set<NSObject>) {
-        guard let touches = touches as? Set<UITouch> else { return } // swift overlay bug?
-    }
     
-    
-    func hitTestColorPickerWithTouches(touches: Set<UITouch>, withEvent event: UIEvent?, shouldHide: Bool) {
+    func hitTestColorPicker(with touches: Set<UITouch>, event: UIEvent?, shouldHide: Bool) {
         for touch in touches {
-            if (colorPicker.hitTest(touch.locationInView(colorPicker), withEvent: event) != nil) {
+            if colorPicker.hitTest(touch.location(in: colorPicker), with: event) != nil {
                 // hide color picker
-                UIView.animateWithDuration(0.2) {
+                UIView.animate(withDuration: 0.2) {
                     self.colorPicker.alpha = 0
                 }
             }
@@ -348,45 +326,44 @@ class ViewController: UIViewController {
     }
     
     func showColorPicker() {
-        UIView.animateWithDuration(0.2) {
+        UIView.animate(withDuration: 0.2) {
             self.colorPicker.alpha = 1
         }
     }
 }
 
 extension CIImage {
-    func imageWithAlpha(alpha: CGFloat) -> CIImage {
-        return imageByApplyingFilter("CIColorMatrix", withInputParameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)])
+    func image(withAlpha alpha: CGFloat) -> CIImage {
+        return applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: alpha)])
     }
 }
 
 // MARK: Touch handling
 
 extension ViewController {
-    override func touchesBegan(touches: Set<UITouch>, withEvent event: UIEvent?) {
-        drawTouches(touches, withEvent: event)
-        hitTestColorPickerWithTouches(touches, withEvent: event, shouldHide: true)
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        drawTouches(touches: touches, withEvent: event)
+        hitTestColorPicker(with: touches, event: event, shouldHide: true)
     }
     
-    override func touchesMoved(touches: Set<UITouch>, withEvent event: UIEvent?) {
-        drawTouches(touches, withEvent: event)
-        hitTestColorPickerWithTouches(touches, withEvent: event, shouldHide: true)
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        drawTouches(touches: touches, withEvent: event)
+        hitTestColorPicker(with: touches, event: event, shouldHide: true)
     }
     
-    override func touchesCancelled(touches: Set<UITouch>?, withEvent event: UIEvent?) {
-        // when is this called w/ nil touches?
-        endTouches(touches ?? [], cancel: true)
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        endTouches(touches: touches, cancel: true)
         showColorPicker()
     }
     
-    override func touchesEnded(touches: Set<UITouch>, withEvent event: UIEvent?) {
-        drawTouches(touches, withEvent: event)
-        endTouches(touches, cancel: false)
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        drawTouches(touches: touches, withEvent: event)
+        endTouches(touches: touches, cancel: false)
         showColorPicker()
     }
     
-    override func touchesEstimatedPropertiesUpdated(touches: Set<NSObject>) {
-        updateEstimatedPropertiesForTouches(touches)
+    override func touchesEstimatedPropertiesUpdated(_ touches: Set<UITouch>) {
+        // update force or pencil tilt
     }
 }
 
